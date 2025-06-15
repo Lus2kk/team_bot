@@ -23,6 +23,16 @@ type Config struct {
 		SSLMode  string `yaml:"sslmode"`
 	} `yaml:"database"`
 
+	LogDatabase struct {
+		Type     string `yaml:"type"`
+		Host     string `yaml:"host"`
+		Port     int    `yaml:"port"`
+		Name     string `yaml:"name"`
+		User     string `yaml:"user"`
+		Password string `yaml:"password"`
+		SSLMode  string `yaml:"sslmode"`
+	} `yaml:"log_database"`
+
 	TelegramAdmins struct {
 		Usernames []string `yaml:"usernames"`
 	} `yaml:"admins"`
@@ -56,5 +66,17 @@ func (c *Config) GetDatabaseConnectionString() string {
 		c.Database.Password,
 		c.Database.Name,
 		c.Database.SSLMode,
+	)
+}
+
+// GetLogDatabaseConnectionString returns PostgreSQL connection string for logs
+func (c *Config) GetLogDatabaseConnectionString() string {
+	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		c.LogDatabase.Host,
+		c.LogDatabase.Port,
+		c.LogDatabase.User,
+		c.LogDatabase.Password,
+		c.LogDatabase.Name,
+		c.LogDatabase.SSLMode,
 	)
 }

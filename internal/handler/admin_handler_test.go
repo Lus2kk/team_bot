@@ -16,7 +16,7 @@ func TestIsAdmin(t *testing.T) {
 		{"admin2", true},
 		{"regular_user", false},
 		{"", false},
-		{"ksunovak", false}, // case sensitive
+		{"ksunovak", false}, 
 	}
 
 	for _, tc := range testCases {

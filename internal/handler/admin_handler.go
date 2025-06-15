@@ -26,16 +26,18 @@ type AuthHandler struct {
 	repo          *sqlrepo.AuthRepository
 	adminUsers    []string
 	inviteService *service.InviteService
+	logService    *service.LogService
 	userStates    map[int64]*UserState
 	stateMutex    sync.RWMutex
 }
 
-func NewAuthHandler(bot *tgbotapi.BotAPI, repo *sqlrepo.AuthRepository, adminUsers []string) *AuthHandler {
+func NewAuthHandler(bot *tgbotapi.BotAPI, repo *sqlrepo.AuthRepository, adminUsers []string, logService *service.LogService) *AuthHandler {
 	return &AuthHandler{
 		bot:           bot,
 		repo:          repo,
 		adminUsers:    adminUsers,
 		inviteService: service.NewInviteService(repo),
+		logService:    logService,
 		userStates:    make(map[int64]*UserState),
 	}
 }
@@ -122,9 +124,13 @@ func (h *AuthHandler) CheckAdminAccess(ctx context.Context, userID int64, chatID
 }
 
 func (h *AuthHandler) HandleStart(ctx context.Context, update *tgbotapi.Update) error {
+	startTime := time.Now()
+	userID := update.Message.From.ID
+	username := update.Message.From.UserName
+	chatID := update.Message.Chat.ID
+
 
 	isAdmin := false
-	username := update.Message.From.UserName
 	for _, adminUsername := range h.adminUsers {
 		if username == adminUsername {
 			isAdmin = true
@@ -133,31 +139,50 @@ func (h *AuthHandler) HandleStart(ctx context.Context, update *tgbotapi.Update) 
 	}
 
 	if !isAdmin {
+
+		duration := time.Since(startTime)
+		h.logService.LogBotCommand(ctx, userID, username, chatID, "/start", true, &duration, nil)
 		return h.HandleJoinTeam(ctx, update)
 	}
 
 	user := &model.User{
-		ID:          update.Message.From.ID,
+		ID:          userID,
 		Username:    username,
-		ChatID:      update.Message.Chat.ID,
+		ChatID:      chatID,
 		CreatedTime: time.Now(),
 		IsAdmin:     isAdmin,
 	}
 
 	if err := h.repo.SaveUser(ctx, user); err != nil {
 		log.Printf("Error saving user: %v", err)
+
+
+		errorCode := "SAVE_USER_ERROR"
+		duration := time.Since(startTime)
+		h.logService.LogBotCommand(ctx, userID, username, chatID, "/start", false, &duration, &errorCode)
+
 		return fmt.Errorf("error saving user: %v", err)
 	}
 
-	msg := tgbotapi.NewMessage(update.Message.Chat.ID,
+
+	h.logService.LogUserRegistration(ctx, userID, chatID, username, true, nil)
+
+	msg := tgbotapi.NewMessage(chatID,
 		fmt.Sprintf("Привет, %s! Я бот для управления командой.\n✅ Вы зарегистрированы как администратор.", username))
 	msg.ReplyToMessageID = update.Message.MessageID
 
 	if _, err := h.bot.Send(msg); err != nil {
+		duration := time.Since(startTime)
+		errorCode := "SEND_MESSAGE_ERROR"
+		h.logService.LogBotCommand(ctx, userID, username, chatID, "/start", false, &duration, &errorCode)
 		return fmt.Errorf("error sending message: %v", err)
 	}
 
-	h.checkAndSendPersonalInfoReminder(ctx, update.Message.From.ID, update.Message.Chat.ID)
+
+	duration := time.Since(startTime)
+	h.logService.LogBotCommand(ctx, userID, username, chatID, "/start", true, &duration, nil)
+
+	h.checkAndSendPersonalInfoReminder(ctx, userID, chatID)
 
 	return nil
 }
@@ -184,6 +209,10 @@ func (h *AuthHandler) HandleAdmin(ctx context.Context, update *tgbotapi.Update) 
 }
 
 func (h *AuthHandler) HandleStartWithToken(ctx context.Context, update *tgbotapi.Update) error {
+	startTime := time.Now()
+	userID := update.Message.From.ID
+	username := update.Message.From.UserName
+	chatID := update.Message.Chat.ID
 
 	parts := strings.Split(update.Message.Text, " ")
 	if len(parts) != 2 {
@@ -194,7 +223,11 @@ func (h *AuthHandler) HandleStartWithToken(ctx context.Context, update *tgbotapi
 
 	inviteToken, err := h.inviteService.ValidateAndUseToken(ctx, token)
 	if err != nil {
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID,
+
+		errorCode := "INVALID_TOKEN"
+		h.logService.LogTokenUsage(ctx, userID, username, chatID, 0, false, &errorCode)
+
+		msg := tgbotapi.NewMessage(chatID,
 			fmt.Sprintf("❌ Ошибка при присоединении к команде: %s", err.Error()))
 		if _, err := h.bot.Send(msg); err != nil {
 			log.Printf("Error sending token error message: %v", err)
@@ -202,21 +235,31 @@ func (h *AuthHandler) HandleStartWithToken(ctx context.Context, update *tgbotapi
 		return h.HandleStart(ctx, update)
 	}
 
-	username := update.Message.From.UserName
+
+	h.logService.LogTokenUsage(ctx, userID, username, chatID, inviteToken.ID, true, nil)
+
 	user := &model.User{
-		ID:          update.Message.From.ID,
+		ID:          userID,
 		Username:    username,
-		ChatID:      update.Message.Chat.ID,
+		ChatID:      chatID,
 		CreatedTime: time.Now(),
 		IsAdmin:     false,
 	}
 
 	if err := h.repo.SaveUser(ctx, user); err != nil {
 		log.Printf("Error saving user: %v", err)
+
+
+		errorCode := "SAVE_USER_ERROR"
+		h.logService.LogError(ctx, &userID, &username, &chatID, "Failed to save user after token validation", nil, &errorCode)
+
 		return fmt.Errorf("error saving user: %v", err)
 	}
 
-	msg := tgbotapi.NewMessage(update.Message.Chat.ID,
+
+	h.logService.LogUserRegistration(ctx, userID, chatID, username, true, nil)
+
+	msg := tgbotapi.NewMessage(chatID,
 		fmt.Sprintf("🎉 Добро пожаловать в команду, %s!\n\n"+
 			"✅ Вы успешно присоединились к команде.\n"+
 			"🔗 Использований токена: %d/%d",
@@ -224,24 +267,45 @@ func (h *AuthHandler) HandleStartWithToken(ctx context.Context, update *tgbotapi
 	msg.ReplyToMessageID = update.Message.MessageID
 
 	if _, err := h.bot.Send(msg); err != nil {
+		duration := time.Since(startTime)
+		errorCode := "SEND_MESSAGE_ERROR"
+		h.logService.LogBotCommand(ctx, userID, username, chatID, "/start with token", false, &duration, &errorCode)
 		return fmt.Errorf("error sending welcome message: %v", err)
 	}
 
-	h.checkAndSendPersonalInfoReminder(ctx, update.Message.From.ID, update.Message.Chat.ID)
+
+	duration := time.Since(startTime)
+	h.logService.LogBotCommand(ctx, userID, username, chatID, "/start with token", true, &duration, nil)
+
+	h.checkAndSendPersonalInfoReminder(ctx, userID, chatID)
 
 	return nil
 }
 
 func (h *AuthHandler) HandleCreateInvite(ctx context.Context, update *tgbotapi.Update) error {
+	startTime := time.Now()
+	adminUserID := update.Message.From.ID
+	adminUsername := update.Message.From.UserName
+	chatID := update.Message.Chat.ID
 
-	hasAccess, err := h.CheckAdminAccess(ctx, update.Message.From.ID, update.Message.Chat.ID)
+	hasAccess, err := h.CheckAdminAccess(ctx, adminUserID, chatID)
 	if err != nil || !hasAccess {
+
+		if !hasAccess {
+			errorCode := "UNAUTHORIZED_ACCESS"
+			duration := time.Since(startTime)
+			h.logService.LogBotCommand(ctx, adminUserID, adminUsername, chatID, "/create_invite", false, &duration, &errorCode)
+		}
 		return err
 	}
 
-	token, err := h.inviteService.CreateInviteLink(ctx, update.Message.From.ID, 24, 50)
+	token, err := h.inviteService.CreateInviteLink(ctx, adminUserID, 24, 50)
 	if err != nil {
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID,
+
+		errorCode := "TOKEN_GENERATION_FAILED"
+		h.logService.LogTokenGeneration(ctx, adminUserID, adminUsername, 0, time.Time{}, false, &errorCode)
+
+		msg := tgbotapi.NewMessage(chatID,
 			fmt.Sprintf("❌ Ошибка при создании пригласительной ссылки: %v", err))
 		if _, err := h.bot.Send(msg); err != nil {
 			log.Printf("Error sending error message: %v", err)
@@ -249,11 +313,18 @@ func (h *AuthHandler) HandleCreateInvite(ctx context.Context, update *tgbotapi.U
 		return fmt.Errorf("error creating invite link: %v", err)
 	}
 
+
+	h.logService.LogTokenGeneration(ctx, adminUserID, adminUsername, token.ID, token.ExpiresAt, true, nil)
+
+
+	details := fmt.Sprintf("Created invite token with %d max usage, expires at %s", token.MaxUsage, token.ExpiresAt.Format(time.RFC3339))
+	h.logService.LogAdminAction(ctx, adminUserID, adminUsername, "create_invite_token", nil, true, &details, nil)
+
 	botInfo, err := h.bot.GetMe()
 	if err != nil {
 		log.Printf("Error getting bot info: %v", err)
 
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID,
+		msg := tgbotapi.NewMessage(chatID,
 			fmt.Sprintf("🔗 <b>Пригласительная ссылка создана!</b>\n\n"+
 				"<b>Токен:</b> <code>%s</code>\n"+
 				"<b>Срок действия:</b> до %s\n"+
@@ -264,14 +335,21 @@ func (h *AuthHandler) HandleCreateInvite(ctx context.Context, update *tgbotapi.U
 				token.MaxUsage))
 		msg.ParseMode = "HTML"
 		if _, err := h.bot.Send(msg); err != nil {
+			duration := time.Since(startTime)
+			errorCode := "SEND_MESSAGE_ERROR"
+			h.logService.LogBotCommand(ctx, adminUserID, adminUsername, chatID, "/create_invite", false, &duration, &errorCode)
 			return fmt.Errorf("error sending invite link: %v", err)
 		}
+
+
+		duration := time.Since(startTime)
+		h.logService.LogBotCommand(ctx, adminUserID, adminUsername, chatID, "/create_invite", true, &duration, nil)
 		return nil
 	}
 
 	inviteLink := h.inviteService.FormatInviteLink(botInfo.UserName, token.Token)
 
-	msg := tgbotapi.NewMessage(update.Message.Chat.ID,
+	msg := tgbotapi.NewMessage(chatID,
 		fmt.Sprintf("🔗 <b>Пригласительная ссылка создана!</b>\n\n"+
 			"<b>Ссылка:</b> %s\n"+
 			"<b>Токен:</b> <code>%s</code>\n"+
@@ -285,8 +363,15 @@ func (h *AuthHandler) HandleCreateInvite(ctx context.Context, update *tgbotapi.U
 	msg.ParseMode = "HTML"
 
 	if _, err := h.bot.Send(msg); err != nil {
+		duration := time.Since(startTime)
+		errorCode := "SEND_MESSAGE_ERROR"
+		h.logService.LogBotCommand(ctx, adminUserID, adminUsername, chatID, "/create_invite", false, &duration, &errorCode)
 		return fmt.Errorf("error sending invite link: %v", err)
 	}
+
+
+	duration := time.Since(startTime)
+	h.logService.LogBotCommand(ctx, adminUserID, adminUsername, chatID, "/create_invite", true, &duration, nil)
 
 	return nil
 }
