@@ -129,7 +129,6 @@ func (h *AuthHandler) HandleStart(ctx context.Context, update *tgbotapi.Update) 
 	username := update.Message.From.UserName
 	chatID := update.Message.Chat.ID
 
-
 	isAdmin := false
 	for _, adminUsername := range h.adminUsers {
 		if username == adminUsername {
@@ -157,13 +156,32 @@ func (h *AuthHandler) HandleStart(ctx context.Context, update *tgbotapi.Update) 
 		log.Printf("Error saving user: %v", err)
 
 
+		if strings.Contains(err.Error(), "user already exists") ||
+			strings.Contains(err.Error(), "user with this chat_id already exists") {
+
+			msg := tgbotapi.NewMessage(chatID,
+				fmt.Sprintf("Привет, %s! Вы уже зарегистрированы как администратор.", username))
+			msg.ReplyToMessageID = update.Message.MessageID
+
+			if _, err := h.bot.Send(msg); err != nil {
+				duration := time.Since(startTime)
+				errorCode := "SEND_MESSAGE_ERROR"
+				h.logService.LogBotCommand(ctx, userID, username, chatID, "/start", false, &duration, &errorCode)
+				return fmt.Errorf("error sending message: %v", err)
+			}
+
+			duration := time.Since(startTime)
+			h.logService.LogBotCommand(ctx, userID, username, chatID, "/start", true, &duration, nil)
+			h.checkAndSendPersonalInfoReminder(ctx, userID, chatID)
+			return nil
+		}
+
 		errorCode := "SAVE_USER_ERROR"
 		duration := time.Since(startTime)
 		h.logService.LogBotCommand(ctx, userID, username, chatID, "/start", false, &duration, &errorCode)
 
 		return fmt.Errorf("error saving user: %v", err)
 	}
-
 
 	h.logService.LogUserRegistration(ctx, userID, chatID, username, true, nil)
 
@@ -177,7 +195,6 @@ func (h *AuthHandler) HandleStart(ctx context.Context, update *tgbotapi.Update) 
 		h.logService.LogBotCommand(ctx, userID, username, chatID, "/start", false, &duration, &errorCode)
 		return fmt.Errorf("error sending message: %v", err)
 	}
-
 
 	duration := time.Since(startTime)
 	h.logService.LogBotCommand(ctx, userID, username, chatID, "/start", true, &duration, nil)
@@ -235,7 +252,6 @@ func (h *AuthHandler) HandleStartWithToken(ctx context.Context, update *tgbotapi
 		return h.HandleStart(ctx, update)
 	}
 
-
 	h.logService.LogTokenUsage(ctx, userID, username, chatID, inviteToken.ID, true, nil)
 
 	user := &model.User{
@@ -250,12 +266,26 @@ func (h *AuthHandler) HandleStartWithToken(ctx context.Context, update *tgbotapi
 		log.Printf("Error saving user: %v", err)
 
 
+		if strings.Contains(err.Error(), "user already exists") ||
+			strings.Contains(err.Error(), "user with this chat_id already exists") {
+
+			msg := tgbotapi.NewMessage(chatID,
+				fmt.Sprintf("🔗 %s, вы уже являетесь участником команды!", username))
+			if _, err := h.bot.Send(msg); err != nil {
+				log.Printf("Error sending already exists message: %v", err)
+			}
+
+			duration := time.Since(startTime)
+			h.logService.LogBotCommand(ctx, userID, username, chatID, "/start with token", true, &duration, nil)
+			h.checkAndSendPersonalInfoReminder(ctx, userID, chatID)
+			return nil
+		}
+
 		errorCode := "SAVE_USER_ERROR"
 		h.logService.LogError(ctx, &userID, &username, &chatID, "Failed to save user after token validation", nil, &errorCode)
 
 		return fmt.Errorf("error saving user: %v", err)
 	}
-
 
 	h.logService.LogUserRegistration(ctx, userID, chatID, username, true, nil)
 
@@ -272,7 +302,6 @@ func (h *AuthHandler) HandleStartWithToken(ctx context.Context, update *tgbotapi
 		h.logService.LogBotCommand(ctx, userID, username, chatID, "/start with token", false, &duration, &errorCode)
 		return fmt.Errorf("error sending welcome message: %v", err)
 	}
-
 
 	duration := time.Since(startTime)
 	h.logService.LogBotCommand(ctx, userID, username, chatID, "/start with token", true, &duration, nil)
@@ -313,9 +342,7 @@ func (h *AuthHandler) HandleCreateInvite(ctx context.Context, update *tgbotapi.U
 		return fmt.Errorf("error creating invite link: %v", err)
 	}
 
-
 	h.logService.LogTokenGeneration(ctx, adminUserID, adminUsername, token.ID, token.ExpiresAt, true, nil)
-
 
 	details := fmt.Sprintf("Created invite token with %d max usage, expires at %s", token.MaxUsage, token.ExpiresAt.Format(time.RFC3339))
 	h.logService.LogAdminAction(ctx, adminUserID, adminUsername, "create_invite_token", nil, true, &details, nil)
@@ -340,7 +367,6 @@ func (h *AuthHandler) HandleCreateInvite(ctx context.Context, update *tgbotapi.U
 			h.logService.LogBotCommand(ctx, adminUserID, adminUsername, chatID, "/create_invite", false, &duration, &errorCode)
 			return fmt.Errorf("error sending invite link: %v", err)
 		}
-
 
 		duration := time.Since(startTime)
 		h.logService.LogBotCommand(ctx, adminUserID, adminUsername, chatID, "/create_invite", true, &duration, nil)
@@ -368,7 +394,6 @@ func (h *AuthHandler) HandleCreateInvite(ctx context.Context, update *tgbotapi.U
 		h.logService.LogBotCommand(ctx, adminUserID, adminUsername, chatID, "/create_invite", false, &duration, &errorCode)
 		return fmt.Errorf("error sending invite link: %v", err)
 	}
-
 
 	duration := time.Since(startTime)
 	h.logService.LogBotCommand(ctx, adminUserID, adminUsername, chatID, "/create_invite", true, &duration, nil)

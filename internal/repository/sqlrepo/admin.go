@@ -17,12 +17,30 @@ func NewAuthRepository(db *sql.DB) *AuthRepository {
 }
 
 func (r *AuthRepository) SaveUser(ctx context.Context, user *model.User) error {
+
+	exists, err := r.UserExists(ctx, user.ID)
+	if err != nil {
+		return fmt.Errorf("error checking user existence: %v", err)
+	}
+	if exists {
+		return fmt.Errorf("user already exists")
+	}
+
+
+	existingUser, err := r.GetUserByChatID(ctx, user.ChatID)
+	if err != nil {
+		return fmt.Errorf("error checking user existence by chat_id: %v", err)
+	}
+	if existingUser != nil {
+		return fmt.Errorf("user with this chat_id already exists")
+	}
+
 	query := `
 		INSERT INTO users (id, username, first_name, last_name, chat_id, created_at, is_admin)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		
 	`
-	_, err := r.db.ExecContext(ctx, query,
+	_, err = r.db.ExecContext(ctx, query,
 		user.ID,
 		user.Username,
 		user.Name,
