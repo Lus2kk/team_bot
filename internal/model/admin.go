@@ -17,8 +17,8 @@ type Message struct {
 type User struct {
 	ID          int64     `json:"id"`
 	Username    string    `json:"username"`
-Name   string    `json:"name"`
-	Surname    string    `json:"surname"`
+	Name        string    `json:"name"`
+	Surname     string    `json:"surname"`
 	ChatID      int64     `json:"chat_id"`
 	CreatedTime time.Time `json:"created_time"`
 	IsAdmin     bool      `json:"is_admin"`

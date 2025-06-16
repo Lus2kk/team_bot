@@ -56,8 +56,8 @@ func (s *AuthService) CreateUser(ctx context.Context, userID int64, username str
 	user := &model.User{
 		ID:          userID,
 		Username:    username,
-		Name:   "", 
-		Surname:    "", 
+		Name:        "",
+		Surname:     "",
 		ChatID:      chatID,
 		CreatedTime: time.Now(),
 		IsAdmin:     isAdmin,
@@ -74,11 +74,9 @@ func (s *AuthService) GetUserByID(ctx context.Context, userID int64) (*model.Use
 	return s.repo.GetUserByID(ctx, userID)
 }
 
-
 func (s *AuthService) UpdatePersonalInfo(ctx context.Context, userID int64, firstName, lastName string) error {
 	return s.repo.AddPersonalInfo(ctx, userID, firstName, lastName)
 }
-
 
 func (s *AuthService) UpdateUserPersonalInfo(ctx context.Context, user *model.User) error {
 	return s.repo.UpdatePersonalInfo(ctx, user)
