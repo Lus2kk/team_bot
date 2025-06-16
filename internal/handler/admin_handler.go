@@ -155,7 +155,6 @@ func (h *AuthHandler) HandleStart(ctx context.Context, update *tgbotapi.Update) 
 	if err := h.repo.SaveUser(ctx, user); err != nil {
 		log.Printf("Error saving user: %v", err)
 
-
 		if strings.Contains(err.Error(), "user already exists") ||
 			strings.Contains(err.Error(), "user with this chat_id already exists") {
 
@@ -264,7 +263,6 @@ func (h *AuthHandler) HandleStartWithToken(ctx context.Context, update *tgbotapi
 
 	if err := h.repo.SaveUser(ctx, user); err != nil {
 		log.Printf("Error saving user: %v", err)
-
 
 		if strings.Contains(err.Error(), "user already exists") ||
 			strings.Contains(err.Error(), "user with this chat_id already exists") {
@@ -815,9 +813,9 @@ func (h *AuthHandler) checkAndHandleUserInput(ctx context.Context, update *tgbot
 			return true
 		}
 
-		editMsg := tgbotapi.NewEditMessageText(chatID, state.MessageID,
-			fmt.Sprintf("✅ Личная информация успешно обновлена:\n\nИмя: %s\nФамилия: %s", name, text))
-		h.bot.Send(editMsg)
+		newMsg := tgbotapi.NewMessage(chatID,
+			fmt.Sprintf("✅ Личная информация успешно сохранена:\n\nИмя: %s\nФамилия: %s", name, text))
+		h.bot.Send(newMsg)
 
 		return true
 	}
